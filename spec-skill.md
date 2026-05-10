@@ -12,3 +12,5 @@ the graph relationship allows spec_manager.py program to navigate the node to re
 /spec prompt or skill explain the above structure and regulates AI Agent's operation.
 by using /spec, AI agent will maintain the .spec.json when it takes user input, generate code, or tries to understand the context
 this approach is meant to preserve the software context for AI agent and also to reduce .py code size by separating .spec.json from .py docstring
+
+the /reverse_spec skill reverse engineer the existing code to create the .spec.json file
