@@ -1,8 +1,14 @@
 # description
-the spec driven development is made of three components:
-1. spec.prompt.md that provide policies for spec methology, include the knowledge graph management, graph node syntax, etc
-2. x.index.json the index file for graph relationship
-3. spec_tool.py the management tool for CRUD operations, 
+the spec driven development is made of four components:
+
+1. spec.prompt.md:
+    the /spec prompt that provides policies for spec methology, include the knowledge graph management, graph node syntax, etc
+2. x.spec.md:
+    file that contain the content details of the requirement and specification text
+    this .spec.md file should contain the content that is mapped by the implementations in code. it should have id that is used for the index file
+3. x.index.json: 
+    the index file for graph relationship that points to the .spec.md or the .py file
+4. spec_tool.py: the management tool for CRUD operations, 
 
 ====
 1. index.json contains knowledge graph relationship. 
