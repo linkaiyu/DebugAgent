@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import re
+import ast
 import argparse
 from pathlib import Path
 import networkx as nx
@@ -53,6 +54,25 @@ class SpecGraphEngine:
         if reverse and not self.graph.has_edge(target, source):
             self.graph.add_edge(target, source, relation=reverse)
 
+    def _get_function_source(self, file_path, function_name):
+        """Extract function source code from a Python file using AST."""
+        try:
+            full_path = self.workspace / file_path
+            if not full_path.exists():
+                return None
+            with open(full_path, 'r', encoding='utf-8') as f:
+                source = f.read()
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    lines = source.split('\n')
+                    start_line = node.lineno - 1
+                    end_line = node.end_lineno if hasattr(node, 'end_lineno') else len(lines)
+                    return '\n'.join(lines[start_line:end_line])
+        except Exception as e:
+            return None
+        return None
+
     def compile_index(self):
         """Builds a knowledge graph from spec files and persists it as JSON."""
         self.graph.clear()
@@ -60,21 +80,36 @@ class SpecGraphEngine:
         specs_dir = self.workspace / "specs"
         specs_dir.mkdir(exist_ok=True)
 
+        missing_descriptions = []
+        missing_requirements = []
+        missing_code_pointers = []
+
         for file_path in specs_dir.glob("*.spec.json"):
             spec_id, meta = self._parse_spec_file(file_path)
             if not spec_id:
                 continue
 
+            code_pointer = meta.get('code_pointer', {})
+            code_file = code_pointer.get('file')
+            code_function = code_pointer.get('function')
+
             self._add_node(
                 spec_id,
                 node_type="spec",
-                summary=meta.get('summary', ''),
+                description=meta.get('description', meta.get('details', meta.get('summary', ''))),
+                requirements=meta.get('requirements', []),
+                type=meta.get('type', 'function'),
                 spec_file=str(file_path.name),
+                file=code_file,
+                function=code_function,
             )
 
-            code_ptr = meta.get('code_pointer', {})
-            code_file = code_ptr.get('file')
-            code_function = code_ptr.get('function')
+            # Preserve additional spec metadata such as requirements or documentation.
+            for key, value in meta.items():
+                if key in {"id", "code_pointer", "depends_on", "relationships", "summary", "details", "description", "requirements", "type"}:
+                    continue
+                self.graph.nodes[spec_id][key] = value
+
             file_node_id = None
             code_node_id = None
 
@@ -104,6 +139,13 @@ class SpecGraphEngine:
             if isinstance(dependencies, str):
                 dependencies = [d.strip() for d in dependencies.split(',') if d.strip()]
 
+            if not meta.get('description') and not meta.get('details') and not meta.get('summary'):
+                missing_descriptions.append(spec_id)
+            if 'requirements' not in meta or not meta.get('requirements'):
+                missing_requirements.append(spec_id)
+            if not code_file or not code_function:
+                missing_code_pointers.append(spec_id)
+
             for dep in dependencies:
                 self._add_node(dep, node_type="spec")
                 self._add_edge(spec_id, dep, "depends_on")
@@ -122,7 +164,18 @@ class SpecGraphEngine:
         with open(self.index_file, 'w', encoding='utf-8') as f:
             json.dump(graph_data, f, indent=2)
 
-        return {"status": "success", "nodes_indexed": len(self.graph.nodes)}
+        result = {
+            "status": "success",
+            "nodes_indexed": len(self.graph.nodes),
+        }
+        if missing_descriptions:
+            result["missing_descriptions"] = missing_descriptions
+        if missing_requirements:
+            result["missing_requirements"] = missing_requirements
+        if missing_code_pointers:
+            result["missing_code_pointers"] = missing_code_pointers
+
+        return result
 
     def _load_index(self):
         """Hydrates the runtime graph from the JSON index cache."""
@@ -152,6 +205,15 @@ class SpecGraphEngine:
         node_attr["id"] = node_id
         node_attr["outgoing_relationships"] = outgoing
         node_attr["incoming_relationships"] = incoming
+        
+        if node_attr.get("node_type") == "code_function":
+            file_path = node_attr.get("file")
+            function_name = node_attr.get("function")
+            if file_path and function_name:
+                source_code = self._get_function_source(file_path, function_name)
+                if source_code:
+                    node_attr["source_code"] = source_code
+        
         return node_attr
 
     def search_spec(self, spec_id):
@@ -169,7 +231,7 @@ class SpecGraphEngine:
             node = self.graph.nodes[aff_id]
             impact_map.append({
                 "spec_id": aff_id,
-                "summary": node.get('summary'),
+                "description": node.get('description'),
                 "target_file": node.get('file'),
                 "target_function": node.get('function')
             })
@@ -218,7 +280,7 @@ class SpecGraphEngine:
         except nx.NetworkXNoPath:
             return {"path": [], "error": "No path found between source and target."}
 
-    def update_or_create_spec(self, spec_id, summary, depends_on=None, code_file="", code_function=""):
+    def update_or_create_spec(self, spec_id, description, spec_type='function', depends_on=None, requirements=None, code_file="", code_function=""):
         """Saves spec metadata and regenerates the knowledge graph."""
         specs_dir = self.workspace / "specs"
         specs_dir.mkdir(exist_ok=True)
@@ -236,13 +298,24 @@ class SpecGraphEngine:
         if depends_on:
             dep_list = [d.strip() for d in depends_on.split(',') if d.strip()]
 
+        req_list = None
+        if requirements:
+            try:
+                parsed = json.loads(requirements)
+                req_list = parsed
+            except Exception:
+                req_list = [r.strip() for r in requirements.split(',') if r.strip()]
+
         meta_payload = {
             "id": spec_id,
-            "type": "function",
-            "summary": summary,
+            "type": spec_type,
+            "description": description,
             "code_pointer": {"file": code_file, "function": code_function},
             "depends_on": dep_list,
         }
+
+        if req_list is not None:
+            meta_payload["requirements"] = req_list
 
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(meta_payload, f, indent=2)
@@ -281,8 +354,12 @@ def main():
 
     update_p = subparsers.add_parser("update", help="Create or edit a functional specification node.")
     update_p.add_argument("--id", required=True, help="Spec ID.")
-    update_p.add_argument("--summary", required=True, help="Short summary text.")
+    update_p.add_argument("--description", required=True, help="Detailed description text.")
+    update_p.add_argument("--details", dest="description", help="Deprecated alias for --description.")
+    update_p.add_argument("--summary", dest="description", help="Deprecated alias for --description.")
+    update_p.add_argument("--type", default="function", help="Spec classification, such as function, module, or service.")
     update_p.add_argument("--depends_on", default="", help="Comma separated system dependencies.")
+    update_p.add_argument("--requirements", default="", help="Comma separated or JSON array of requirements.")
     update_p.add_argument("--file", default="", help="Target file mapping pointer.")
     update_p.add_argument("--function", default="", help="Target function implementation string.")
 
@@ -309,8 +386,10 @@ def main():
     elif args.command == "update":
         res = engine.update_or_create_spec(
             spec_id=args.id,
-            summary=args.summary,
+            description=args.description,
+            spec_type=args.type,
             depends_on=args.depends_on,
+            requirements=args.requirements,
             code_file=args.file,
             code_function=args.function,
         )
