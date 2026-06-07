@@ -43,5 +43,140 @@ the spec driven development is made of four components:
     specification   : id and content element for the full specification text
     implementation  : id that identifies the function as described in bullet point 1 above
 
+6. to improve traverse performance, consider update spec_tool.py to use this json schema for .spec.json. this should cover the types for requirement, specification, module, class, function etc software structure.
+
+make sure you understand the following examples for schema and runtime code
+
+{
+  "entities": {
+    "<entity_id>": {
+      "type": "<entity_type>",
+      "name": "<name>",
+      "properties": {}
+    }
+  },
+
+  "relations": [
+    {
+      "source": "<entity_id>",
+      "relation": "<relation_type>",
+      "target": "<entity_id>",
+      "properties": {}
+    }
+  ]
+}
+
+so that these node types can be stored, for example
+
+requirement:
+
+{
+  "id": "req_login",
+  "type": "Requirement",
+  "name": "User Login",
+  "properties": {
+    "priority": "high"
+  }
+}
+specification:
+
+{
+  "id": "spec_oauth",
+  "type": "Specification",
+  "name": "OAuth Authentication",
+  "properties": {
+    "version": "1.0"
+  }
+}
+
+class:
+
+{
+  "id": "class_authservice",
+  "type": "Class",
+  "name": "AuthService",
+  "properties": {
+    "file": "auth_service.py"
+  }
+}
+
+function:
+
+{
+  "id": "func_validate_token",
+  "type": "Function",
+  "name": "validate_token",
+  "properties": {
+    "file": "auth_service.py",
+    "line": 45
+  }
+}
+
+relationships:
+
+[
+  {
+    "source": "req_login",
+    "relation": "implemented_by",
+    "target": "spec_oauth"
+  },
+
+  {
+    "source": "spec_oauth",
+    "relation": "defines",
+    "target": "class_authservice"
+  },
+
+  {
+    "source": "class_authservice",
+    "relation": "contains",
+    "target": "func_validate_token"
+  }
+]
+
+for runtime code, at loading time:
+
+entities = {}
+
+outgoing_edges = {}
+incoming_edges = {}
+
+type_index = {}
+name_index = {}
+
+entity look up:
+
+entities["func_validate_token"]
+
+type index:
+
+type_index = {
+    "Function": {
+        "func_validate_token",
+        "func_login"
+    },
+
+    "Class": {
+        "class_authservice"
+    }
+}
+query:
+find_all_functions()
+
+use strong typed relations:
+
+implemented_by
+defines
+contains
+calls
+inherits
+uses
+verified_by
+depends_on
+creates
+reads
+writes
+
+
     
 
